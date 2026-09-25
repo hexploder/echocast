@@ -16,8 +16,8 @@ Panel {
   readonly property bool backendInstalled: service ? service.backendInstalled : true
   readonly property bool backendChecked: service ? service.backendChecked : false
   readonly property string role: service ? service.role : ""
-  readonly property bool enabled: service ? service.enabled : false
-  readonly property string streamState: service ? service.state : ""
+  readonly property bool passthroughEnabled: service ? service.passthroughEnabled : false
+  readonly property string streamState: service ? service.streamState : ""
   readonly property var sinks: service ? service.sinks : []
   readonly property var deviceOptions: [{ value: "default", label: "Default" }].concat(root.sinks)
 
@@ -126,9 +126,9 @@ Panel {
           description: root.streamState === "redirect"
             ? "Streaming to " + (root.service ? root.service.serverDisplay : "")
             : "Playing locally"
-          checked: root.enabled
+          checked: root.passthroughEnabled
           foreground: root.barForeground
-          onClicked: if (root.service) root.service.setEnabled(!root.enabled)
+          onClicked: if (root.service) root.service.setPassthroughEnabled(!root.passthroughEnabled)
         }
 
         Text {
@@ -160,9 +160,9 @@ Panel {
           description: root.service && root.service.clients.length > 0
             ? root.service.clients.length + " client(s) registered"
             : "No clients registered — run: echocast add-client"
-          checked: root.enabled
+          checked: root.passthroughEnabled
           foreground: root.barForeground
-          onClicked: if (root.service) root.service.setEnabled(!root.enabled)
+          onClicked: if (root.service) root.service.setPassthroughEnabled(!root.passthroughEnabled)
         }
 
         Dropdown {

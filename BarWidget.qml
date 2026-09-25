@@ -19,18 +19,18 @@ BarWidget {
   }
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
-  readonly property var service: bar && bar.shell ? bar.shell.serviceFor("io.github.hexploder.echocast") : null
-  readonly property bool backendInstalled: service ? service.backendInstalled : true
-  readonly property string role: service ? service.role : ""
-  readonly property bool enabled: service ? service.enabled : false
-  readonly property string state: service ? service.state : ""
+  readonly property var service: root.bar && root.bar.shell ? root.bar.shell.serviceFor("io.github.hexploder.echocast") : null
+  readonly property bool backendInstalled: root.service ? root.service.backendInstalled : true
+  readonly property string role: root.service ? root.service.role : ""
+  readonly property bool passthroughEnabled: root.service ? root.service.passthroughEnabled : false
+  readonly property string streamState: root.service ? root.service.streamState : ""
 
   readonly property string tooltip: {
-    if (!backendInstalled) return "Echocast · not installed yet, click to see how"
-    if (role !== "server" && role !== "client") return "Echocast · click to set up"
-    if (!enabled) return "Echocast · off"
-    if (role === "server") return "Echocast · server, sharing " + (service ? service.device : "default")
-    return "Echocast · " + (state === "redirect" ? "streaming to " + (service ? service.serverDisplay : "") : "playing locally")
+    if (!root.backendInstalled) return "Echocast · not installed yet, click to see how"
+    if (root.role !== "server" && root.role !== "client") return "Echocast · click to set up"
+    if (!root.passthroughEnabled) return "Echocast · off"
+    if (root.role === "server") return "Echocast · server, sharing " + (root.service ? root.service.device : "default")
+    return "Echocast · " + (root.streamState === "redirect" ? "streaming to " + (root.service ? root.service.serverDisplay : "") : "playing locally")
   }
 
   visible: true
@@ -56,7 +56,7 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: "󰝚"
-    dimmed: !backendInstalled || role === "" || !enabled
+    dimmed: !root.backendInstalled || root.role === "" || !root.passthroughEnabled
     tooltipText: root.tooltip
 
     onPressed: function(b) {

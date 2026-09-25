@@ -15,9 +15,13 @@ Item {
   property bool backendChecked: false
   property bool backendInstalled: false
 
+  // Named passthroughEnabled/streamState rather than enabled/state: Item
+  // already has both of those built in (visibility/input-enabled and the
+  // QtQuick state-machine's current state), and shadowing them silently
+  // works but trips qmllint's property-override check.
   property string role: ""
-  property bool enabled: false
-  property string state: ""
+  property bool passthroughEnabled: false
+  property string streamState: ""
   property string device: "default"
   property string serverIp: ""
   property string serverUser: ""
@@ -54,7 +58,7 @@ Item {
   }
 
   function setRole(r) { _run(["set-role", r]) }
-  function setEnabled(v) { _run([role === "server" ? "server-set-enabled" : "client-set-enabled", v ? "true" : "false"]) }
+  function setPassthroughEnabled(v) { _run([role === "server" ? "server-set-enabled" : "client-set-enabled", v ? "true" : "false"]) }
   function setDevice(name) { _run(["server-set-device", name]) }
   function setServerIp(ip) { _run(["client-set-server", ip]) }
 
@@ -77,8 +81,8 @@ Item {
       try {
         var data = JSON.parse(statusOutput.text)
         root.role = data.role || ""
-        root.enabled = data.enabled === true
-        root.state = data.state || ""
+        root.passthroughEnabled = data.enabled === true
+        root.streamState = data.state || ""
         root.device = data.device || "default"
         root.serverIp = data.server_ip || ""
         root.serverUser = data.server_user || ""
