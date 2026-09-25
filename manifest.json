@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.hexploder.echocast",
+  "name": "Echocast",
+  "version": "1.0.0",
+  "author": "hexploder",
+  "license": "MIT",
+  "description": "Redirect one machine's audio to another machine's speakers over SSH — on/off and a device picker on the server, on/off on the client — with automatic local fallback the moment that's not possible.",
+  "kinds": ["bar-widget", "service"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Echocast",
+    "description": "On/off (and, on the server, an output device picker) for redirecting audio to/from another machine over SSH.",
+    "category": "Audio",
+    "aliases": ["audio", "passthrough", "cast", "speakers", "ssh"],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

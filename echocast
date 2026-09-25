@@ -1,0 +1,310 @@
+#!/usr/bin/env bash
+#
+# echocast — redirect one machine's system audio to another machine's
+# speakers over SSH, with automatic local fallback.
+#
+# In Greek myth, Echo was a nymph whose own voice was taken from her — all
+# she could do was repeat, elsewhere, what she'd just heard. This is that,
+# for your notification sounds: whatever plays on the client machine is
+# heard on the server's speakers instead, for as long as that's possible,
+# and falls back to playing locally the moment it isn't (server switched
+# off, unreachable, or this client no longer accepted).
+#
+# Roles (same script, one shared config file, subcommands branch on it):
+#   server — the machine with the speakers. Has no long-running process of
+#            its own: sshd is the "server", and a dedicated,
+#            command-restricted authorized_keys entry per accepted client
+#            invokes `server-serve-connection` for the lifetime of one
+#            connection. The on/off + device switches just flip
+#            config.json, which that (and the next) connection reads.
+#   client — the machine generating the sound. Runs `client-watch` as a
+#            long-lived systemd user service: while enabled, it keeps
+#            redirecting local audio into a null sink and streaming that
+#            sink's monitor to the server over SSH; the moment the pipe
+#            can't be kept alive for any reason, it restores local playback
+#            and keeps retrying in the background.
+#
+# Transport: raw PCM (s16le, 48kHz, stereo) piped through the SSH channel
+# itself — no separate port, no separate encryption. No jitter buffering,
+# so this is fine for notification/desktop sound, not for anything needing
+# tight audio/video sync.
+#
+# Config: ~/.config/echocast/config.json — one file, works for either role
+# (unused fields for the other role are just ignored):
+#   { "role": "server"|"client",
+#     "enabled": bool,
+#     "device": "default" | "<sink name>",       (server only)
+#     "clients": [ { "name": "...", "pubkey": "..." } ],  (server only, display)
+#     "server_ip": "x.x.x.x", "server_user": "...", "server_port": 22  (client only) }
+#
+# Status (client only, for the bar widget):
+#   $XDG_RUNTIME_DIR/echocast/status.json
+#   { "state": "redirect"|"local", "since": <epoch> }
+#
+# Subcommands:
+#   set-role <server|client>        which half of this feature this machine plays
+#   init-keys                       generate this machine's client keypair if missing, print pubkey
+#   client-watch                    long-running; the systemd ExecStart
+#   client-set-enabled <true|false>
+#   client-set-server <ip>|<user@ip> [port]
+#   server-serve-connection         invoked by the restricted authorized_keys command=
+#   server-set-enabled <true|false>
+#   server-set-device <name>        "default" or a pactl sink name
+#   add-client <name> <pubkey>      append a restricted authorized_keys entry
+#   remove-client <name>
+#   status                          print config.json merged with status.json, for the widget
+set -uo pipefail
+
+SELF="$(readlink -f "$0")"
+CFG_DIR="$HOME/.config/echocast"
+CFG="$CFG_DIR/config.json"
+KEY="$CFG_DIR/id_ed25519"
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+RUN_DIR="${XDG_RUNTIME_DIR}/echocast"
+STATUS="$RUN_DIR/status.json"
+SINK_NAME="echocast-out"
+PORT_DEFAULT=22
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=4 -o ServerAliveInterval=3 -o ServerAliveCountMax=2)
+PCM_FMT=(--format=s16le --rate=48000 --channels=2 --raw)
+AUTH_MARKER="echocast"
+
+mkdir -p "$CFG_DIR" "$RUN_DIR"
+
+# ---- config helpers -------------------------------------------------------
+
+cfg_default() {
+  cat <<'JSON'
+{"role":null,"enabled":false,"device":"default","clients":[],"server_ip":null,"server_user":null,"server_port":22}
+JSON
+}
+
+cfg_read() { [ -f "$CFG" ] && cat "$CFG" || cfg_default; }
+
+cfg_get() { cfg_read | jq -r --arg k "$1" '.[$k] // empty'; }
+
+# Atomically merge into config.json. Args are passed straight to jq, e.g.
+# `cfg_set ".enabled = true"` or `cfg_set --arg n "$name" '.foo = $n'`.
+cfg_set() {
+  local tmp
+  tmp="$(mktemp "$CFG_DIR/config.json.XXXXXX")"
+  cfg_read | jq "$@" > "$tmp" && mv "$tmp" "$CFG"
+}
+
+write_status() {
+  local state="$1"
+  jq -n --arg state "$state" --argjson since "$(date +%s)" \
+    '{state: $state, since: $since}' > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
+}
+
+log() { printf '%s [echocast] %s\n' "$(date -Is)" "$*" >&2; }
+
+cmd_set_role() {
+  case "$1" in
+    server|client) cfg_set --arg r "$1" '.role = $r' ;;
+    *) echo "usage: set-role <server|client>" >&2; exit 2 ;;
+  esac
+}
+
+# ---- shared: keys -----------------------------------------------------
+
+cmd_init_keys() {
+  if [ ! -f "$KEY" ]; then
+    ssh-keygen -t ed25519 -N "" -C "echocast@$(hostname)" -f "$KEY" >/dev/null
+    log "generated new keypair at $KEY"
+    if command -v notify-send >/dev/null 2>&1; then
+      notify-send "Echocast" "New key generated. Register it on the server:\n$(cat "$KEY.pub")" || true
+    fi
+  fi
+  cat "$KEY.pub"
+}
+
+# ---- client role -----------------------------------------------------
+
+client_real_default_sink() {
+  # The sink that was default before we took it over, remembered across
+  # redirect on/off cycles so we always know what to restore.
+  cat "$RUN_DIR/real_sink" 2>/dev/null || pactl get-default-sink 2>/dev/null
+}
+
+client_ensure_local() {
+  local real
+  real="$(client_real_default_sink)"
+  if pactl get-default-sink 2>/dev/null | grep -qx "$SINK_NAME"; then
+    [ -n "$real" ] && pactl set-default-sink "$real" 2>/dev/null
+  fi
+  if pactl list sinks short 2>/dev/null | grep -q "\b$SINK_NAME\b"; then
+    local modid
+    modid="$(pactl list modules short 2>/dev/null | awk -v s="sink_name=$SINK_NAME" '$0 ~ s {print $1}')"
+    [ -n "$modid" ] && pactl unload-module "$modid" 2>/dev/null
+  fi
+  write_status local
+}
+
+client_ensure_redirect_sink() {
+  if ! pactl list sinks short 2>/dev/null | grep -q "\b$SINK_NAME\b"; then
+    pactl get-default-sink 2>/dev/null > "$RUN_DIR/real_sink"
+    pactl load-module module-null-sink "sink_name=$SINK_NAME" \
+      "sink_properties=device.description=Echocast" >/dev/null 2>&1
+  fi
+  pactl set-default-sink "$SINK_NAME" 2>/dev/null
+  # Move whatever's already playing onto the redirect sink too.
+  pactl list sink-inputs short 2>/dev/null | while read -r id _; do
+    pactl move-sink-input "$id" "$SINK_NAME" 2>/dev/null || true
+  done
+}
+
+# Runs one attempt at streaming; blocks for as long as the pipe stays up.
+# Returns non-zero once it's dead (peer gone, server disabled us, network drop).
+client_stream_once() {
+  local ip port user
+  ip="$(cfg_get server_ip)"; port="$(cfg_get server_port)"; user="$(cfg_get server_user)"
+  [ -n "$ip" ] && [ "$ip" != "null" ] || { log "no server_ip configured"; sleep 5; return 1; }
+  [ -n "$port" ] && [ "$port" != "null" ] || port="$PORT_DEFAULT"
+  [ -n "$user" ] && [ "$user" != "null" ] || user="$(whoami)"
+
+  client_ensure_redirect_sink
+  log "streaming to $user@$ip:$port"
+  # Backgrounded and polled (rather than run in the foreground) so a local
+  # disable can interrupt an otherwise-healthy connection immediately,
+  # instead of only noticing after the pipe dies on its own.
+  parecord --device="${SINK_NAME}.monitor" "${PCM_FMT[@]}" 2>/dev/null \
+    | ssh "${SSH_OPTS[@]}" -i "$KEY" -p "$port" "$user@$ip" 2>/dev/null &
+  local pipe_pid=$!
+  # A rejected/unreachable connection (bad host, server disabled, not an
+  # accepted client) fails within a second or two; only claim "redirect"
+  # once the pipe has outlived that window, so the widget doesn't flash
+  # connected during a failed attempt.
+  sleep 1.5
+  if kill -0 "$pipe_pid" 2>/dev/null; then write_status redirect; else write_status local; fi
+  while kill -0 "$pipe_pid" 2>/dev/null; do
+    if [ "$(cfg_get enabled)" != "true" ]; then
+      log "passthrough disabled locally, closing stream"
+      kill "$pipe_pid" 2>/dev/null
+      break
+    fi
+    sleep 1
+  done
+  wait "$pipe_pid" 2>/dev/null
+  return 1
+}
+
+cmd_client_watch() {
+  cmd_init_keys >/dev/null
+  trap 'client_ensure_local' EXIT TERM INT
+  while :; do
+    if [ "$(cfg_get enabled)" = "true" ]; then
+      client_stream_once
+      client_ensure_local
+      sleep 5
+    else
+      client_ensure_local
+      sleep 3
+    fi
+  done
+}
+
+cmd_client_set_enabled() { cfg_set ".enabled = $([ "$1" = true ] && echo true || echo false)"; }
+
+# Accepts either "host" or "user@host" for $1 — the latter is needed
+# whenever the server's account name differs from this machine's own.
+cmd_client_set_server() {
+  local input="$1" port="${2:-$PORT_DEFAULT}" user host
+  case "$input" in
+    *@*) user="${input%@*}"; host="${input#*@}" ;;
+    *)   user="$(whoami)"; host="$input" ;;
+  esac
+  cfg_set --arg ip "$host" --arg user "$user" --argjson port "$port" \
+    '.server_ip = $ip | .server_user = $user | .server_port = $port'
+}
+
+# ---- server role -----------------------------------------------------
+
+# Invoked as the forced command for one incoming connection. Runs for the
+# life of that SSH session; polls config.json so a mid-stream toggle-off
+# kills playback promptly instead of waiting for the client to give up.
+cmd_server_serve_connection() {
+  if [ "$(cfg_get enabled)" != "true" ]; then
+    log "rejected connection: passthrough is off"
+    exit 1
+  fi
+  local device target
+  device="$(cfg_get device)"
+  [ -n "$device" ] && [ "$device" != "null" ] || device="default"
+  if [ "$device" = "default" ]; then
+    target="$(pactl get-default-sink 2>/dev/null)"
+  else
+    target="$device"
+  fi
+  log "accepted connection, playing to $target"
+
+  # <&0 matters: this script has no controlling terminal (it's an SSH forced
+  # command), so without job control a backgrounded command that doesn't
+  # explicitly redirect its own stdin gets /dev/null instead of the real
+  # pipe (POSIX's "asynchronous command, no job control" rule) — paplay
+  # would see instant EOF and exit cleanly within a second, never actually
+  # playing anything.
+  paplay --device="$target" "${PCM_FMT[@]}" <&0 &
+  local play_pid=$!
+  while kill -0 "$play_pid" 2>/dev/null; do
+    if [ "$(cfg_get enabled)" != "true" ]; then
+      log "passthrough switched off mid-stream, closing"
+      kill "$play_pid" 2>/dev/null
+      break
+    fi
+    sleep 1
+  done
+  wait "$play_pid" 2>/dev/null
+}
+
+cmd_server_set_enabled() { cfg_set ".enabled = $([ "$1" = true ] && echo true || echo false)"; }
+cmd_server_set_device() { cfg_set --arg d "$1" '.device = $d'; }
+
+cmd_add_client() {
+  local name="$1"; shift
+  local pubkey="$*"
+  [ -n "$name" ] && [ -n "$pubkey" ] || { echo "usage: add-client <name> <pubkey>" >&2; exit 2; }
+  local authkeys="$HOME/.ssh/authorized_keys" line
+  line="command=\"$SELF server-serve-connection\",restrict $pubkey # ${AUTH_MARKER}:${name}"
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  touch "$authkeys" && chmod 600 "$authkeys"
+  if grep -qF "# ${AUTH_MARKER}:${name}" "$authkeys" 2>/dev/null; then
+    echo "client '$name' already present in $authkeys — remove-client first to replace it" >&2
+    exit 1
+  fi
+  printf '%s\n' "$line" >> "$authkeys"
+  cfg_set --arg n "$name" --arg k "$pubkey" '.clients += [{name: $n, pubkey: $k}]'
+  echo "added client '$name'"
+}
+
+cmd_remove_client() {
+  local name="$1" authkeys="$HOME/.ssh/authorized_keys"
+  [ -n "$name" ] || { echo "usage: remove-client <name>" >&2; exit 2; }
+  [ -f "$authkeys" ] && sed -i "/# ${AUTH_MARKER}:${name}\$/d" "$authkeys"
+  cfg_set --arg n "$name" '.clients |= map(select(.name != $n))'
+  echo "removed client '$name'"
+}
+
+# ---- shared: status ----------------------------------------------------
+
+cmd_status() {
+  jq -n --slurpfile cfg <(cfg_read) --slurpfile status <(cat "$STATUS" 2>/dev/null || echo '{}') \
+    '($cfg[0]) * ($status[0])'
+}
+
+case "${1:-}" in
+  set-role)                  shift; cmd_set_role "$@" ;;
+  init-keys)                 cmd_init_keys ;;
+  client-watch)               cmd_client_watch ;;
+  client-set-enabled)         shift; cmd_client_set_enabled "$@" ;;
+  client-set-server)          shift; cmd_client_set_server "$@" ;;
+  server-serve-connection)    cmd_server_serve_connection ;;
+  server-set-enabled)         shift; cmd_server_set_enabled "$@" ;;
+  server-set-device)          shift; cmd_server_set_device "$@" ;;
+  add-client)                 shift; cmd_add_client "$@" ;;
+  remove-client)               shift; cmd_remove_client "$@" ;;
+  status)                     cmd_status ;;
+  *)
+    echo "usage: ${0##*/} {set-role|init-keys|client-watch|client-set-enabled|client-set-server|server-serve-connection|server-set-enabled|server-set-device|add-client|remove-client|status}" >&2
+    exit 2
+    ;;
+esac
