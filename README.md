@@ -1,4 +1,24 @@
-# Echocast
+```
+    ECHOCAST
+     echocast
+      chocast
+       hocast
+        ocast
+         cast
+          ast
+           st
+            t
+```
+
+<div align="center">
+
+**🔊 your voice, heard somewhere else 🔊**
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Omarchy plugin](https://img.shields.io/badge/omarchy-plugin-8a5cf6.svg)](https://omarchy.org)
+[![Shell](https://img.shields.io/badge/bash-CLI-4EAA25.svg?logo=gnubash&logoColor=white)](echocast)
+
+</div>
 
 Hear one machine's sound out of another machine's speakers, over SSH,
 automatically falling back to local playback the moment that's not possible.
@@ -14,17 +34,17 @@ the good speakers are attached to a desktop across the room: dock the
 laptop, its sound comes out of the desktop; unplug it and walk away, it
 plays through its own speakers again, with no manual switching.
 
-## How it works
+## ⚙️ How it works
 
 Two roles, same install, one on each machine:
 
-- **Server** — the machine with the speakers. Has no daemon of its own:
+- 🖥️ **Server** — the machine with the speakers. Has no daemon of its own:
   `sshd` *is* the server. Each accepted client gets a dedicated,
   command-restricted SSH key (the same trick GitHub deploy keys use) that
   can do exactly one thing — play whatever PCM audio arrives on that
   connection to the server's chosen output device. The bar widget's on/off
   switch and device picker just flip a config file that connection reads.
-- **Client** — the machine generating the sound. A small systemd user
+- 💻 **Client** — the machine generating the sound. A small systemd user
   service keeps a null audio sink as the default output and streams its
   monitor to the server over SSH. The moment that connection can't be kept
   alive for any reason — passthrough switched off, the server unreachable
@@ -50,7 +70,7 @@ registered on the server by hand (`echocast add-client <name> <pubkey>`) —
 nothing here piggybacks on your personal SSH setup, and adding a third
 machine later is the same two steps again, independent of the first.
 
-## Install
+## 📦 Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/main/install.sh | bash
@@ -88,7 +108,7 @@ If the widget's icon shows a small hint that the backend isn't installed
 yet, that's exactly the case this section covers — the popup shows the
 `install.sh` one-liner directly so there's nothing to look up.
 
-## Using it
+## 🎛️ Using it
 
 Click the bar icon. The first time, it asks which role this machine plays.
 
@@ -113,7 +133,7 @@ echocast remove-client <name>             # run on the server
 echocast set-buffer-ms <ms>               # jitter buffer, either side (default 200)
 ```
 
-## Manual install
+## 🛠️ Manual install
 
 Server machine:
 
@@ -151,14 +171,14 @@ Then turn it on from either side's bar widget, or:
 echocast client-set-enabled true   # on the client
 ```
 
-## Adding a third machine later
+## ➕ Adding a third machine later
 
 Same client install on the new machine, pointed at the server's address,
 then one `add-client <name> <pubkey>` on the server. Nothing about the
 existing clients changes — the server's device selection and the other
 clients' settings are all independent of each other.
 
-## Troubleshooting
+## 🔧 Troubleshooting
 
 - **Nothing plays on the server**: run `echocast status` on both sides.
   `state: "local"` on the client for more than a few seconds while enabled
@@ -181,7 +201,7 @@ clients' settings are all independent of each other.
   the other way (lower than 200) trades that margin back for less delay,
   at the risk of the clicks coming back on anything less than a clean LAN.
 
-## Why SSH instead of a dedicated audio protocol
+## 🤔 Why SSH instead of a dedicated audio protocol
 
 Because it's already there, already encrypted, and already exactly as
 reachable as the server machine itself — no new port, no new trust store,
@@ -192,6 +212,6 @@ sub-20ms, sample-accurate sync that music production or gaming need — for
 that, look at something built for it, like Snapcast or a PipeWire RTP
 module.
 
-## License
+## 📜 License
 
 MIT — see [LICENSE](LICENSE).
