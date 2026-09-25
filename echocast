@@ -25,9 +25,13 @@
 #            and keeps retrying in the background.
 #
 # Transport: raw PCM (s16le, 48kHz, stereo) piped through the SSH channel
-# itself — no separate port, no separate encryption. No jitter buffering,
-# so this is fine for notification/desktop sound, not for anything needing
-# tight audio/video sync.
+# itself — no separate port, no separate encryption. Both ends request a
+# `buffer_ms` (default 200ms) worth of jitter buffer from
+# PipeWire/PulseAudio via --latency-msec, which absorbs the network stalls
+# that would otherwise show up as audible clicks/dropouts — at the cost of
+# that much fixed delay. Good enough for notification sound and for a
+# video's audio track playing elsewhere in the room; not aimed at anything
+# needing tight lip-sync or pro-audio-grade latency.
 #
 # Config: ~/.config/echocast/config.json — one file, works for either role
 # (unused fields for the other role are just ignored):
@@ -35,7 +39,8 @@
 #     "enabled": bool,
 #     "device": "default" | "<sink name>",       (server only)
 #     "clients": [ { "name": "...", "pubkey": "..." } ],  (server only, display)
-#     "server_ip": "x.x.x.x", "server_user": "...", "server_port": 22  (client only) }
+#     "server_ip": "x.x.x.x", "server_user": "...", "server_port": 22,  (client only)
+#     "buffer_ms": 200 }
 #
 # Status (client only, for the bar widget):
 #   $XDG_RUNTIME_DIR/echocast/status.json
@@ -43,6 +48,7 @@
 #
 # Subcommands:
 #   set-role <server|client>        which half of this feature this machine plays
+#   set-buffer-ms <ms>              jitter buffer size, either side (default 200)
 #   init-keys                       generate this machine's client keypair if missing, print pubkey
 #   client-watch                    long-running; the systemd ExecStart
 #   client-set-enabled <true|false>
@@ -64,6 +70,7 @@ RUN_DIR="${XDG_RUNTIME_DIR}/echocast"
 STATUS="$RUN_DIR/status.json"
 SINK_NAME="echocast-out"
 PORT_DEFAULT=22
+BUFFER_MS_DEFAULT=200
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=4 -o ServerAliveInterval=3 -o ServerAliveCountMax=2)
 PCM_FMT=(--format=s16le --rate=48000 --channels=2 --raw)
 AUTH_MARKER="echocast"
@@ -73,8 +80,8 @@ mkdir -p "$CFG_DIR" "$RUN_DIR"
 # ---- config helpers -------------------------------------------------------
 
 cfg_default() {
-  cat <<'JSON'
-{"role":null,"enabled":false,"device":"default","clients":[],"server_ip":null,"server_user":null,"server_port":22}
+  cat <<JSON
+{"role":null,"enabled":false,"device":"default","clients":[],"server_ip":null,"server_user":null,"server_port":22,"buffer_ms":$BUFFER_MS_DEFAULT}
 JSON
 }
 
@@ -103,6 +110,25 @@ cmd_set_role() {
     server|client) cfg_set --arg r "$1" '.role = $r' ;;
     *) echo "usage: set-role <server|client>" >&2; exit 2 ;;
   esac
+}
+
+# Buffer size on both ends (client capture and server playback), used as a
+# jitter buffer against network stalls — a bigger buffer trades fixed delay
+# for fewer audible glitches. Same field, either side can set it (whichever
+# side actually cares in a given setup); read fresh at connection time so a
+# change takes effect on the next attempt without restarting anything.
+buffer_ms() {
+  local v
+  v="$(cfg_get buffer_ms)"
+  [ -n "$v" ] && [ "$v" != "null" ] || v="$BUFFER_MS_DEFAULT"
+  echo "$v"
+}
+
+cmd_set_buffer_ms() {
+  case "$1" in
+    ''|*[!0-9]*) echo "usage: set-buffer-ms <milliseconds>" >&2; exit 2 ;;
+  esac
+  cfg_set --argjson ms "$1" '.buffer_ms = $ms'
 }
 
 # ---- shared: keys -----------------------------------------------------
@@ -156,18 +182,19 @@ client_ensure_redirect_sink() {
 # Runs one attempt at streaming; blocks for as long as the pipe stays up.
 # Returns non-zero once it's dead (peer gone, server disabled us, network drop).
 client_stream_once() {
-  local ip port user
+  local ip port user buf
   ip="$(cfg_get server_ip)"; port="$(cfg_get server_port)"; user="$(cfg_get server_user)"
   [ -n "$ip" ] && [ "$ip" != "null" ] || { log "no server_ip configured"; sleep 5; return 1; }
   [ -n "$port" ] && [ "$port" != "null" ] || port="$PORT_DEFAULT"
   [ -n "$user" ] && [ "$user" != "null" ] || user="$(whoami)"
+  buf="$(buffer_ms)"
 
   client_ensure_redirect_sink
-  log "streaming to $user@$ip:$port"
+  log "streaming to $user@$ip:$port (buffer ${buf}ms)"
   # Backgrounded and polled (rather than run in the foreground) so a local
   # disable can interrupt an otherwise-healthy connection immediately,
   # instead of only noticing after the pipe dies on its own.
-  parecord --device="${SINK_NAME}.monitor" "${PCM_FMT[@]}" 2>/dev/null \
+  parecord --device="${SINK_NAME}.monitor" "${PCM_FMT[@]}" --latency-msec="$buf" 2>/dev/null \
     | ssh "${SSH_OPTS[@]}" -i "$KEY" -p "$port" "$user@$ip" 2>/dev/null &
   local pipe_pid=$!
   # A rejected/unreachable connection (bad host, server disabled, not an
@@ -227,7 +254,7 @@ cmd_server_serve_connection() {
     log "rejected connection: passthrough is off"
     exit 1
   fi
-  local device target
+  local device target buf
   device="$(cfg_get device)"
   [ -n "$device" ] && [ "$device" != "null" ] || device="default"
   if [ "$device" = "default" ]; then
@@ -235,7 +262,8 @@ cmd_server_serve_connection() {
   else
     target="$device"
   fi
-  log "accepted connection, playing to $target"
+  buf="$(buffer_ms)"
+  log "accepted connection, playing to $target (buffer ${buf}ms)"
 
   # <&0 matters: this script has no controlling terminal (it's an SSH forced
   # command), so without job control a backgrounded command that doesn't
@@ -243,7 +271,7 @@ cmd_server_serve_connection() {
   # pipe (POSIX's "asynchronous command, no job control" rule) — paplay
   # would see instant EOF and exit cleanly within a second, never actually
   # playing anything.
-  paplay --device="$target" "${PCM_FMT[@]}" <&0 &
+  paplay --device="$target" "${PCM_FMT[@]}" --latency-msec="$buf" <&0 &
   local play_pid=$!
   while kill -0 "$play_pid" 2>/dev/null; do
     if [ "$(cfg_get enabled)" != "true" ]; then
@@ -293,6 +321,7 @@ cmd_status() {
 
 case "${1:-}" in
   set-role)                  shift; cmd_set_role "$@" ;;
+  set-buffer-ms)              shift; cmd_set_buffer_ms "$@" ;;
   init-keys)                 cmd_init_keys ;;
   client-watch)               cmd_client_watch ;;
   client-set-enabled)         shift; cmd_client_set_enabled "$@" ;;
@@ -304,7 +333,7 @@ case "${1:-}" in
   remove-client)               shift; cmd_remove_client "$@" ;;
   status)                     cmd_status ;;
   *)
-    echo "usage: ${0##*/} {set-role|init-keys|client-watch|client-set-enabled|client-set-server|server-serve-connection|server-set-enabled|server-set-device|add-client|remove-client|status}" >&2
+    echo "usage: ${0##*/} {set-role|set-buffer-ms|init-keys|client-watch|client-set-enabled|client-set-server|server-serve-connection|server-set-enabled|server-set-device|add-client|remove-client|status}" >&2
     exit 2
     ;;
 esac

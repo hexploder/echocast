@@ -33,9 +33,17 @@ Two roles, same install, one on each machine:
 
 Audio travels as raw PCM straight through the SSH channel itself: no extra
 port, no extra encryption layer, nothing to open on your firewall beyond
-SSH already being reachable on the server. There's no jitter buffering, so
-this is built for notification/desktop sound, not for anything that needs
-tight audio/video sync.
+SSH already being reachable on the server. Both ends hold a **200ms jitter
+buffer** by default (tunable with `echocast set-buffer-ms <ms>`, either
+side) — enough to absorb the odd network stall as silence you'd never
+notice instead of an audible click, at the cost of that much fixed delay.
+That's built for notification sound and for a video's audio playing out of
+another room's speakers (a training video in a browser tab, say) — fine
+places to trade a fraction of a second of lag for it never stuttering.
+It's not aimed at anything needing frame-accurate lip-sync or pro-audio
+latency. Multiple clients can stream to the same server at once — PipeWire
+mixes whatever lands on the chosen output device, same as any other two
+apps playing sound on it.
 
 Each client has its own dedicated keypair, generated on first run and
 registered on the server by hand (`echocast add-client <name> <pubkey>`) —
@@ -102,6 +110,7 @@ echocast server-set-enabled <true|false>
 echocast server-set-device <name|default> # pactl/wpctl sink name
 echocast add-client <name> <pubkey>       # run on the server
 echocast remove-client <name>             # run on the server
+echocast set-buffer-ms <ms>               # jitter buffer, either side (default 200)
 ```
 
 ## Manual install
@@ -166,15 +175,22 @@ clients' settings are all independent of each other.
 - **The bar icon says the backend isn't installed**: run the one-liner it
   shows you, then reopen the panel — no reload needed, it re-checks on
   every open.
+- **Audio clicks/drops out over Wi-Fi or a busy network**: raise the
+  buffer — `echocast set-buffer-ms 400` (or higher) on either machine,
+  takes effect on the next connection attempt, no restart needed. Going
+  the other way (lower than 200) trades that margin back for less delay,
+  at the risk of the clicks coming back on anything less than a clean LAN.
 
 ## Why SSH instead of a dedicated audio protocol
 
 Because it's already there, already encrypted, and already exactly as
 reachable as the server machine itself — no new port, no new trust store,
-no separate service to keep patched. The tradeoff is no jitter buffering,
-which is fine for notification and desktop sound and not the goal for
-music production or anything needing tight sync — for that, look at
-something built for it, like Snapcast or a PipeWire RTP module.
+no separate service to keep patched. The tradeoff is latency, not
+reliability: the 200ms default buffer (see above) makes it solid for
+notification and desktop/video sound, but it's not chasing the
+sub-20ms, sample-accurate sync that music production or gaming need — for
+that, look at something built for it, like Snapcast or a PipeWire RTP
+module.
 
 ## License
 
