@@ -1,16 +1,8 @@
-```
-    ECHOCAST
-     echocast
-      chocast
-       hocast
-        ocast
-         cast
-          ast
-           st
-            t
-```
-
 <div align="center">
+
+<!-- TODO: banner image at docs/banner.png — see design prompt in progress -->
+
+# Echocast
 
 **🔊 your voice, heard somewhere else 🔊**
 
