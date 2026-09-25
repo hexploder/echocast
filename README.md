@@ -1,6 +1,6 @@
 <div align="center">
 
-<!-- TODO: banner image at docs/banner.png — see design prompt in progress -->
+<img src="docs/banner.png" alt="Echo, calling across the valley" width="100%">
 
 # Echocast
 
