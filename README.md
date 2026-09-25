@@ -110,6 +110,14 @@ Click the bar icon. The first time, it asks which role this machine plays.
   clients to reach.
 - **Client**: an on/off switch and a `user@host` field for the server.
 
+<div align="center">
+<img src="docs/screenshot-server.png" alt="Server panel: on/off and a device picker" width="260">
+&nbsp;&nbsp;&nbsp;
+<img src="docs/screenshot-client.png" alt="Client panel: on/off, streaming status, and the server address" width="260">
+
+<sub>Server (left) · Client (right)</sub>
+</div>
+
 Everything the widget does, the CLI does too — useful for scripting, or if
 you'd rather not click:
 
