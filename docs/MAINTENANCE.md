@@ -11,23 +11,39 @@ SSH, with automatic local fallback. A CLI/systemd backend (`echocast`,
 `echocast-client.service`) plus an Omarchy quickshell plugin
 (`manifest.json`, `Service.qml`, `BarWidget.qml`, `Panel.qml`) that's a
 thin UI over that backend. Full mechanism and usage docs live in
-[README.md](README.md) — don't duplicate that here, this file is only for
-what a maintainer/agent needs that isn't already there.
+[../README.md](../README.md) — don't duplicate that here, this file is
+only for what a maintainer/agent needs that isn't already there.
 
-## Current status (2026-09-25)
+This file used to live at the repo root as `CLAUDE.md`, which meant an
+agent-aware tool could auto-load it on anyone's machine the moment the
+published repo landed in their working tree — an instruction path outside
+the plugin's actual runtime. A marketplace reviewer flagged exactly that
+on 2026-09-26, so it now lives here under a name with no agent-auto-load
+convention attached. Practical effect: opening this repo root in Claude
+Code (or similar) no longer surfaces this file automatically — read it
+manually (`docs/MAINTENANCE.md`) when picking this project back up.
+
+## Current status (2026-09-26)
 
 - Repo is **public**: https://github.com/hexploder/echocast
 - Marketplace submission open: **issue #8724** on
   `omacom/omarchy-plugin-marketplace`
   (`gh issue view 8724 --repo omacom/omarchy-plugin-marketplace`).
-  As of this writing: automated structure/Quattro-compatibility check
-  passed (`validated` label), but an automated capability scan flagged
-  `remote-build` (the `curl | bash` installer), `service-management`
-  (the `systemctl --user ...` calls), and `installer` — all expected for
-  what this plugin does, but they gate it behind manual maintainer review
+  Timeline so far: automated structure/Quattro-compatibility check passed
+  (`validated` label); automated capability scan flagged `remote-build`
+  (the `curl | bash` installer), `service-management` (the
+  `systemctl --user ...` calls), and `installer` — all expected for what
+  this plugin does, but they gate it behind manual maintainer review
   (`security-review-required` label) before `approved-and-verified` gets
-  applied. This is *listing* review, not a security audit — check the
-  issue for maintainer comments before assuming it's still just waiting.
+  applied; two commits landed after the reviewed one, which the
+  marketplace can't approve until re-validated, so the issue got edited
+  to re-trigger `validate-submission` against the new HEAD each time
+  (see git history of this file at the old `CLAUDE.md` path for exactly
+  what changed and why); then the manual reviewer flagged the root
+  `CLAUDE.md` itself (see above) — moved here, needs one more
+  re-validation pass. This is *listing* review, not a security audit —
+  check the issue for maintainer comments before assuming it's still just
+  waiting.
 - Deployed and working end-to-end on the maintainer's own two machines
   (one server role, one client role) — that's the only real-world testing
   so far. No other users, no CI, no automated tests.
