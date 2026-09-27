@@ -38,9 +38,14 @@ die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 install_file() {
   local src="$1" dst="$2"
   if [ -L "$dst" ] || { [ -e "$dst" ] && ! cmp -s "$src" "$dst" 2>/dev/null; }; then
-    local bak="${dst}.pre-echocast.$(date +%s)"
+    # mktemp (not "$(date +%s)") for the backup name: a timestamp is only
+    # second-resolution and collides on a repeated install, silently
+    # overwriting the backup from a previous run instead of the file it was
+    # protecting.
+    local bak
+    bak="$(mktemp "${dst}.pre-echocast.XXXXXX")"
     warn "$dst already exists — moved aside to $bak before installing"
-    mv "$dst" "$bak"
+    mv -f "$dst" "$bak"
   fi
   cp "$src" "$dst"
 }
