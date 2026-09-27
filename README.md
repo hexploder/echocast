@@ -65,7 +65,7 @@ machine later is the same two steps again, independent of the first.
 ## 📦 Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/5ecfa9f591621ed8c0fe291e4f83911b46a5b372/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/57eb3aa0b92af34f348e6e69283e3109179948e4/install.sh | bash
 ```
 
 Run it on **both** machines. It installs the `echocast` CLI, installs the
