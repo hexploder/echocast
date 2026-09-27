@@ -3,7 +3,8 @@
 # Echocast guided installer.
 #
 # Works two ways:
-#   curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/v1.0.0/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/<commit>/install.sh | bash
+#     (see README.md's Install section for the exact pinned commit)
 #   (or) clone the repo and run ./install.sh from inside it
 #
 # Either way it: installs the `echocast` CLI, installs the Omarchy bar
@@ -12,13 +13,14 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/hexploder/echocast.git"
-# Pinned, not "main": the curl one-liner above fetches this exact file from
-# this exact tag, so the source it then clones (below) has to match — a
-# floating "main" clone here would let the reviewed/listed snapshot and the
-# code that actually runs at install time silently diverge. Bump this (and
-# the raw-URL install commands in README.md/Service.qml) together whenever
-# a new release is tagged.
-REPO_REF="v1.0.0"
+# An exact commit, not a branch or tag: unlike a ref, a commit SHA can't be
+# retargeted after the fact, so this is what actually pins the source this
+# script installs. This value only has to name *a* commit with correct,
+# already-reviewed payload files (echocast/manifest.json/*.qml/the systemd
+# unit) — it doesn't need to be this install.sh's own commit, which would
+# be circular (a commit can't name its own hash). See docs/MAINTENANCE.md
+# for the release process this implies.
+REPO_SHA="9585d5662580d94c3e8ab1d9f10d3021ea6dffd6"
 BIN_DIR="$HOME/.local/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/io.github.hexploder.echocast"
@@ -56,8 +58,17 @@ if [ -z "$SCRIPT_DIR" ]; then
   say "Fetching Echocast..."
   command -v git >/dev/null 2>&1 || die "git is required (or run this from inside a clone of the repo)"
   CLEANUP_DIR="$(mktemp -d)"
-  git clone --depth 1 --branch "$REPO_REF" -q "$REPO_URL" "$CLEANUP_DIR" \
-    || die "couldn't clone $REPO_URL @ $REPO_REF"
+  # A plain `git clone --branch` only accepts a branch/tag name, not a raw
+  # SHA (and GitHub only advertises ref tips for that anyway) — fetching
+  # the SHA directly and checking it out is what actually pins this to an
+  # exact, unretargetable commit regardless of what main or any tag does
+  # afterward.
+  git init -q "$CLEANUP_DIR"
+  git -C "$CLEANUP_DIR" remote add origin "$REPO_URL"
+  if ! git -C "$CLEANUP_DIR" fetch --depth 1 -q origin "$REPO_SHA" \
+      || ! git -C "$CLEANUP_DIR" -c advice.detachedHead=false checkout -q FETCH_HEAD; then
+    die "couldn't fetch $REPO_URL @ $REPO_SHA"
+  fi
   SCRIPT_DIR="$CLEANUP_DIR"
   trap 'rm -rf "$CLEANUP_DIR"' EXIT
 fi
