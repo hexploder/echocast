@@ -291,6 +291,35 @@ cmd_add_client() {
   local name="$1"; shift
   local pubkey="$*"
   [ -n "$name" ] && [ -n "$pubkey" ] || { echo "usage: add-client <name> <pubkey>" >&2; exit 2; }
+  # $name lands in the same authorized_keys line (as a trailing comment) and
+  # is later used as a sed pattern in remove-client — an embedded newline
+  # there is the same authorized_keys-injection risk as an unvalidated
+  # pubkey, and stray regex metacharacters would make remove-client delete
+  # other clients' entries too.
+  case "$name" in
+    ''|*[!A-Za-z0-9._-]*)
+      echo "client name must contain only letters, digits, '.', '_', '-' (got: $name)" >&2
+      exit 1
+      ;;
+  esac
+  # A pubkey with an embedded newline would let the rest of it land on its
+  # own line in authorized_keys — a second, unrestricted key outside the
+  # command=/restrict entry below. authorized_keys also treats a leading
+  # '#' or blank line as a no-op, so a key type is the only thing we accept
+  # as the start of the (single) line we're about to write.
+  case "$pubkey" in
+    *$'\n'*|*$'\r'*)
+      echo "pubkey must be a single line (no embedded newlines) — refusing to add it" >&2
+      exit 1
+      ;;
+  esac
+  case "$pubkey" in
+    ssh-*\ *|ecdsa-sha2-*\ *|sk-ssh-*\ *|sk-ecdsa-sha2-*\ *) ;;
+    *)
+      echo "pubkey doesn't look like a single OpenSSH public key line ('<type> <base64> [comment]')" >&2
+      exit 1
+      ;;
+  esac
   local authkeys="$HOME/.ssh/authorized_keys" line
   line="command=\"$SELF server-serve-connection\",restrict $pubkey # ${AUTH_MARKER}:${name}"
   mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"

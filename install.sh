@@ -21,6 +21,23 @@ say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Copies src to dst without silently destroying whatever was already there.
+# A symlink at dst is removed rather than followed (cp would otherwise write
+# through it to wherever it points); a pre-existing regular file with
+# different content is moved aside instead of overwritten.
+install_file() {
+  local src="$1" dst="$2"
+  if [ -L "$dst" ]; then
+    warn "$dst is a symlink — removing it before installing a regular file"
+    rm -f "$dst"
+  elif [ -e "$dst" ] && ! cmp -s "$src" "$dst" 2>/dev/null; then
+    local bak="${dst}.pre-echocast.$(date +%s)"
+    warn "$dst already exists — moved aside to $bak before installing"
+    mv "$dst" "$bak"
+  fi
+  cp "$src" "$dst"
+}
+
 # ---- locate the source files (local checkout, or a fresh temp clone) -----
 
 SCRIPT_DIR=""
@@ -52,7 +69,7 @@ fi
 # ---- install the CLI -------------------------------------------------------
 
 mkdir -p "$BIN_DIR"
-cp "$SCRIPT_DIR/echocast" "$BIN_DIR/echocast"
+install_file "$SCRIPT_DIR/echocast" "$BIN_DIR/echocast"
 chmod +x "$BIN_DIR/echocast"
 say "Installed $BIN_DIR/echocast"
 
@@ -65,7 +82,9 @@ esac
 
 if [ -d "$HOME/.config/omarchy" ]; then
   mkdir -p "$PLUGIN_DIR"
-  cp "$SCRIPT_DIR/manifest.json" "$SCRIPT_DIR/Service.qml" "$SCRIPT_DIR/BarWidget.qml" "$SCRIPT_DIR/Panel.qml" "$PLUGIN_DIR/"
+  for f in manifest.json Service.qml BarWidget.qml Panel.qml; do
+    install_file "$SCRIPT_DIR/$f" "$PLUGIN_DIR/$f"
+  done
   say "Installed the bar widget to $PLUGIN_DIR"
   say "Add it to your bar with: omarchy-shell shell toggle omarchy.menu '{}' (Settings → Bar), or add"
   say '  {"id": "io.github.hexploder.echocast"}'
@@ -101,7 +120,7 @@ case "$choice" in
   2)
     "$BIN_DIR/echocast" set-role client
     mkdir -p "$SYSTEMD_DIR"
-    cp "$SCRIPT_DIR/echocast-client.service" "$SYSTEMD_DIR/"
+    install_file "$SCRIPT_DIR/echocast-client.service" "$SYSTEMD_DIR/echocast-client.service"
     systemctl --user daemon-reload
     read -r -p "Server address, as user@host (e.g. alice@192.168.1.50): " addr
     "$BIN_DIR/echocast" client-set-server "$addr"
