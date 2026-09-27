@@ -111,23 +111,41 @@ plugins), not a real problem. The warning class that *is* real:
   `echocast set-buffer-ms <ms>`) requesting `--latency-msec` on both
   `parecord` and `paplay`.
 
-## Install is pinned to a tag, not `main` — bump all 4 spots together
+## Install is pinned to an exact commit SHA — releasing needs 2 commits
 
-The marketplace review (issue #8724) rejected the original `curl | bash
-.../main/install.sh` flow: `main` is mutable, so the reviewed/listed
-commit and whatever code actually runs at install time could silently
-diverge (`install.sh` cloned `main` again internally, too). Fixed by
-pinning everything to the `v1.0.0` tag instead. Cutting a new release
-means bumping the version in **all** of these, together, or the trust
-boundary reopens:
+The marketplace review (issue #8724) rejected `curl | bash .../main/install.sh`
+(mutable branch — the reviewed commit and whatever runs at install time
+could diverge), then rejected pinning to the `v1.0.0` *tag* for the same
+reason: a tag is a movable ref too, retargetable by anyone who can push
+here. Only a commit SHA is actually immutable (it's a hash of the content,
+not a pointer to it), so that's what both layers pin to now:
 
-- `README.md` — the `curl` one-liner and the manual-install `git clone --branch`
-- `Service.qml` — `installCommand`
-- `install.sh` — `REPO_REF` (what it clones internally when run via curl)
-- `manifest.json` — `version`
+- `install.sh`'s `REPO_SHA` — the commit it fetches (via `git fetch origin
+  <sha>` + checkout, not `git clone --branch`, since `--branch` only takes
+  a ref name) to get the payload files (`echocast`, `manifest.json`,
+  `*.qml`, the systemd unit).
+- `README.md`'s `curl` one-liner and manual-install block, and
+  `Service.qml`'s `installCommand` — the commit whose `install.sh` gets
+  fetched and run in the first place.
 
-then tagging that exact commit and pushing the tag + a GitHub Release
-before pointing the marketplace issue at it.
+A commit can't name its own hash (you'd need to know it before it exists),
+so these two are necessarily *different* commits, one generation apart.
+Releasing something new is therefore always at least two commits:
+
+1. Make the actual change (to the payload files, to `install.sh`'s
+   bootstrap logic, or both). If the payload changed, update `REPO_SHA` in
+   this same commit to point at wherever the correct new payload already
+   lives (an earlier already-pushed commit — never itself).
+2. Once (1) is pushed and its hash is known, a follow-up commit updates
+   `README.md` + `Service.qml` to that hash. This second commit's own
+   content is never itself fetched by anyone's install — it's just
+   pointing at the first one — so it can be pure documentation.
+
+`manifest.json`'s `version` is separate, human-facing semver — bump it
+whenever the payload changes, independent of the SHA plumbing above. The
+`v1.0.0` git tag / GitHub Release still exist for browsability, but
+they're no longer part of the trust boundary — don't rely on either
+pointing at anything current.
 
 ## If a "verified" (not just listed) tier ever gets requested
 

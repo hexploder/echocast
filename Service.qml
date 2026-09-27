@@ -30,7 +30,7 @@ Item {
   property bool statusKnown: false
 
   readonly property string serverDisplay: serverIp === "" ? "" : (serverUser !== "" ? serverUser + "@" + serverIp : serverIp)
-  readonly property string installCommand: "curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/v1.0.0/install.sh | bash"
+  readonly property string installCommand: "curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/5ecfa9f591621ed8c0fe291e4f83911b46a5b372/install.sh | bash"
 
   // Real output devices only (hardware/virtual sinks, not individual
   // playback streams), for the server role's device picker.
