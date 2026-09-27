@@ -22,15 +22,14 @@ warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # Copies src to dst without silently destroying whatever was already there.
-# A symlink at dst is removed rather than followed (cp would otherwise write
-# through it to wherever it points); a pre-existing regular file with
-# different content is moved aside instead of overwritten.
+# A symlink at dst is moved aside rather than followed (cp would otherwise
+# write through it to wherever it points) or deleted (it may be something
+# the user, or another install, put there on purpose — renaming it aside
+# keeps it recoverable instead of destroying it outright). A pre-existing
+# regular file with different content is moved aside the same way.
 install_file() {
   local src="$1" dst="$2"
-  if [ -L "$dst" ]; then
-    warn "$dst is a symlink — removing it before installing a regular file"
-    rm -f "$dst"
-  elif [ -e "$dst" ] && ! cmp -s "$src" "$dst" 2>/dev/null; then
+  if [ -L "$dst" ] || { [ -e "$dst" ] && ! cmp -s "$src" "$dst" 2>/dev/null; }; then
     local bak="${dst}.pre-echocast.$(date +%s)"
     warn "$dst already exists — moved aside to $bak before installing"
     mv "$dst" "$bak"

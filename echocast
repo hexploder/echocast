@@ -336,7 +336,22 @@ cmd_add_client() {
 cmd_remove_client() {
   local name="$1" authkeys="$HOME/.ssh/authorized_keys"
   [ -n "$name" ] || { echo "usage: remove-client <name>" >&2; exit 2; }
-  [ -f "$authkeys" ] && sed -i "/# ${AUTH_MARKER}:${name}\$/d" "$authkeys"
+  if [ -f "$authkeys" ]; then
+    # A sed regex address would treat name's allowed '.' as "any char", so
+    # e.g. remove-client a.b would also delete a separate client aXb's
+    # grant. Match the marker as a literal suffix instead — the quoted
+    # $marker in this glob pattern is not re-interpreted, so nothing in
+    # $name (regex or glob metacharacters) can widen the match.
+    local marker="# ${AUTH_MARKER}:${name}" tmp line
+    tmp="$(mktemp "${authkeys}.XXXXXX")"
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        *"$marker") continue ;;
+      esac
+      printf '%s\n' "$line"
+    done < "$authkeys" > "$tmp"
+    mv "$tmp" "$authkeys"
+  fi
   cfg_set --arg n "$name" '.clients |= map(select(.name != $n))'
   echo "removed client '$name'"
 }
