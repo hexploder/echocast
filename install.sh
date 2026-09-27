@@ -3,7 +3,7 @@
 # Echocast guided installer.
 #
 # Works two ways:
-#   curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/v1.0.0/install.sh | bash
 #   (or) clone the repo and run ./install.sh from inside it
 #
 # Either way it: installs the `echocast` CLI, installs the Omarchy bar
@@ -12,7 +12,13 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/hexploder/echocast.git"
-RAW_URL="https://raw.githubusercontent.com/hexploder/echocast/main"
+# Pinned, not "main": the curl one-liner above fetches this exact file from
+# this exact tag, so the source it then clones (below) has to match — a
+# floating "main" clone here would let the reviewed/listed snapshot and the
+# code that actually runs at install time silently diverge. Bump this (and
+# the raw-URL install commands in README.md/Service.qml) together whenever
+# a new release is tagged.
+REPO_REF="v1.0.0"
 BIN_DIR="$HOME/.local/bin"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/io.github.hexploder.echocast"
@@ -50,7 +56,8 @@ if [ -z "$SCRIPT_DIR" ]; then
   say "Fetching Echocast..."
   command -v git >/dev/null 2>&1 || die "git is required (or run this from inside a clone of the repo)"
   CLEANUP_DIR="$(mktemp -d)"
-  git clone --depth 1 -q "$REPO_URL" "$CLEANUP_DIR" || die "couldn't clone $REPO_URL"
+  git clone --depth 1 --branch "$REPO_REF" -q "$REPO_URL" "$CLEANUP_DIR" \
+    || die "couldn't clone $REPO_URL @ $REPO_REF"
   SCRIPT_DIR="$CLEANUP_DIR"
   trap 'rm -rf "$CLEANUP_DIR"' EXIT
 fi

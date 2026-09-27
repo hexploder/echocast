@@ -65,7 +65,7 @@ machine later is the same two steps again, independent of the first.
 ## 📦 Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hexploder/echocast/v1.0.0/install.sh | bash
 ```
 
 Run it on **both** machines. It installs the `echocast` CLI, installs the
@@ -85,7 +85,7 @@ CLI's config to an Omarchy machine, or you'd rather manage the bar layout
 yourself:
 
 ```bash
-git clone https://github.com/hexploder/echocast.git /tmp/echocast
+git clone --branch v1.0.0 --depth 1 https://github.com/hexploder/echocast.git /tmp/echocast
 mkdir -p ~/.config/omarchy/plugins/io.github.hexploder.echocast
 cp /tmp/echocast/{manifest.json,Service.qml,BarWidget.qml,Panel.qml} \
    ~/.config/omarchy/plugins/io.github.hexploder.echocast/

@@ -111,6 +111,24 @@ plugins), not a real problem. The warning class that *is* real:
   `echocast set-buffer-ms <ms>`) requesting `--latency-msec` on both
   `parecord` and `paplay`.
 
+## Install is pinned to a tag, not `main` — bump all 4 spots together
+
+The marketplace review (issue #8724) rejected the original `curl | bash
+.../main/install.sh` flow: `main` is mutable, so the reviewed/listed
+commit and whatever code actually runs at install time could silently
+diverge (`install.sh` cloned `main` again internally, too). Fixed by
+pinning everything to the `v1.0.0` tag instead. Cutting a new release
+means bumping the version in **all** of these, together, or the trust
+boundary reopens:
+
+- `README.md` — the `curl` one-liner and the manual-install `git clone --branch`
+- `Service.qml` — `installCommand`
+- `install.sh` — `REPO_REF` (what it clones internally when run via curl)
+- `manifest.json` — `version`
+
+then tagging that exact commit and pushing the tag + a GitHub Release
+before pointing the marketplace issue at it.
+
 ## If a "verified" (not just listed) tier ever gets requested
 
 Not started, and nobody's asked for it — don't begin this without an
